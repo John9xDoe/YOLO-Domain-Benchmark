@@ -1,6 +1,7 @@
 import numpy as np
 import cv2
 import random
+import json
 
 def generate_background(height=640, width=640, vis=True, color=None):
     bg = np.zeros((height, width, 3), dtype=np.uint8)
@@ -11,7 +12,7 @@ def generate_background(height=640, width=640, vis=True, color=None):
         cv2.waitKey(0)
     return bg
 
-def generate_object(fig_type, h_bg=640, w_bg=640, color_fig=None, color_bg=None, base_size=100):
+def generate_object(fig_type, h_bg=640, w_bg=640, color_fig=None, color_bg=None, base_size=100, save=True):
     bg = generate_background(h_bg, w_bg, vis=False, color=color_bg)
 
     if color_fig is None:
@@ -34,23 +35,61 @@ def generate_object(fig_type, h_bg=640, w_bg=640, color_fig=None, color_bg=None,
     )
 
     if fig_type == 'circle':
-        _generate_circle(bg, center, base_size, color_fig)
-    elif fig_type == 'rectangle':
-        _generate_square(bg, center, base_size, color_fig)
+        img, label = _generate_circle(bg, center, base_size, color_fig)
+    elif fig_type == 'square':
+        img, label = _generate_square(bg, center, base_size, color_fig)
     elif fig_type == 'triangle':
         center = (
             random.randint(int(np.sqrt(3) * base_size), int(w_bg - np.sqrt(3) * base_size)),
             random.randint(base_size * 2, h_bg - base_size)
         )
-        _generate_triangle(bg, center, base_size, color_fig)
+        img, label = _generate_triangle(bg, center, base_size, color_fig)
 
-    return bg
+    classes = {
+        'circle': 0,
+        'triangle': 1,
+        'square': 2
+    }
+    if save:
+        _save_data_sample(classes[fig_type], img, label)
 
-def _generate_circle(bg, center, radius, color_circle):
+    return img, label
+
+def _generate_circle(bg, center, radius, color_circle, show_bbox=True):
     cv2.circle(bg, center, radius, color_circle, thickness=-1)
-    return bg
+    cx, cy = center
 
-def _generate_square(bg, center, apothem, color_square):
+    bbox = {
+        'type': 'circle',
+        'abs': [
+        cx - radius, cy - radius,
+        cx + radius, cy + radius,
+    ],
+        'rel': [
+        cx / bg.shape[0],
+        cy / bg.shape[1],
+        (2 * radius) / bg.shape[0],
+        (2 * radius) / bg.shape[1]
+    ],
+        'base_size': radius,
+        'center': center
+    }
+
+    if show_bbox:
+        bg_copy = bg.copy()
+        cv2.rectangle(
+            bg_copy,
+            (bbox['abs'][0], bbox['abs'][1]),
+            (bbox['abs'][2], bbox['abs'][3]),
+            (0,255,0),
+            thickness=4
+        )
+        print(bg_copy.shape)
+        visualize_image(bg_copy, time=1000)
+
+    return bg, bbox
+
+def _generate_square(bg, center, apothem, color_square, show_bbox=True):
     cx, cy = center
     cv2.rectangle(
         bg,
@@ -59,9 +98,40 @@ def _generate_square(bg, center, apothem, color_square):
         color_square,
         thickness=-1
     )
-    return bg
 
-def _generate_triangle(bg, center, apothem, color_triangle):
+    bbox = {
+        'type': 'circle',
+        'abs': [
+        cx - apothem, cy - apothem,
+        cx + apothem, cy + apothem,
+    ],
+        'rel': [
+        cx / bg.shape[0],
+        cy / bg.shape[1],
+        (2 * apothem) / bg.shape[0],
+        (2 * apothem) / bg.shape[1]
+    ],
+        'base_size': apothem,
+        'center': center
+    }
+
+    if show_bbox:
+        bg_copy = bg.copy()
+        cv2.rectangle(
+            bg_copy,
+            (bbox['abs'][0], bbox['abs'][1]),
+            (bbox['abs'][2], bbox['abs'][3]),
+            (0,255,0),
+            thickness=4
+        )
+        visualize_image(bg_copy, time=1000)
+
+    return bg, bbox
+
+def _calculate_bbox():
+    pass
+
+def _generate_triangle(bg, center, apothem, color_triangle, show_bbox=True):
     cx, cy = center
     pts = [
         (cx - int(np.sqrt(3) * apothem), cy + apothem),
@@ -72,12 +142,50 @@ def _generate_triangle(bg, center, apothem, color_triangle):
     pts = np.array([pts], dtype=np.int32)
 
     cv2.fillPoly(bg, [pts], color_triangle)
-    return bg
 
-def visualize(bg, time=0, name='Figure'):
-    cv2.imshow(name, bg)
+    bbox = {
+        'type': 'circle',
+        'abs': [
+            int(cx - np.sqrt(3) * apothem), int(cy - 2 * apothem),
+            int(cx + np.sqrt(3) * apothem), int(cy + apothem),
+        ],
+        'rel': [
+            cx / bg.shape[0],
+            cy / bg.shape[1],
+            (2 * apothem) / bg.shape[0],
+            (2 * apothem) / bg.shape[1]
+        ],
+        'base_size': apothem,
+        'center': center
+    }
+
+    if show_bbox:
+        bg_copy = bg.copy()
+        cv2.rectangle(
+            bg_copy,
+            (bbox['abs'][0], bbox['abs'][1]),
+            (bbox['abs'][2], bbox['abs'][3]),
+            (0, 255, 0),
+            thickness=4
+        )
+        visualize_image(bg_copy, time=1000)
+
+    return bg, bbox
+
+def _save_data_sample(class_id, img, label, path='data', filename='datasample'):
+    cv2.imwrite(f'{path}/images/{filename}.png', img)
+
+    with open(f'{path}/meta/{filename}.json', 'w') as f:
+        json.dump(label, f, indent=2) # '\n'.join(map(str,label))
+
+    with open(f'{path}/bbox/{filename}.txt', 'w') as f:
+        bbox = label['rel']
+        f.write(f"{class_id} {bbox[0]} {bbox[1]} {bbox[2]} {bbox[3]}")
+
+def visualize_image(img, time=0, name='Figure'):
+    cv2.imshow(name, img)
     cv2.waitKey(time)
     cv2.destroyAllWindows()
 
 
-visualize(generate_object('triangle',640, 640), time=1000)
+visualize_image(generate_object('triangle',640, 640)[0], time=1000)
