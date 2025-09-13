@@ -3,6 +3,8 @@ import cv2
 import random
 import json
 
+import albumentations as A
+
 def generate_background(height=640, width=640, vis=True, color=None):
     bg = np.zeros((height, width, 3), dtype=np.uint8)
     if color:
@@ -50,6 +52,9 @@ def generate_object(fig_type, h_bg=640, w_bg=640, color_fig=None, color_bg=None,
         'triangle': 1,
         'square': 2
     }
+
+    img, label['rel'] = transform_image(clean_image=img, bboxes=[label['rel']], strong=True)
+
     if save:
         _save_data_sample(classes[fig_type], img, label)
 
@@ -172,20 +177,44 @@ def _generate_triangle(bg, center, apothem, color_triangle, show_bbox=True):
 
     return bg, bbox
 
-def _save_data_sample(class_id, img, label, path='data', filename='datasample'):
+def _save_data_sample(class_id, img, label, path='data', filename='datasample', meta=False):
     cv2.imwrite(f'{path}/images/{filename}.png', img)
 
-    with open(f'{path}/meta/{filename}.json', 'w') as f:
-        json.dump(label, f, indent=2) # '\n'.join(map(str,label))
-
     with open(f'{path}/bbox/{filename}.txt', 'w') as f:
-        bbox = label['rel']
+        bbox = label['rel'][0]
         f.write(f"{class_id} {bbox[0]} {bbox[1]} {bbox[2]} {bbox[3]}")
+
+    if meta:
+        with open(f'{path}/meta/{filename}.json', 'w') as f:
+            json.dump(label, f, indent=2)
 
 def visualize_image(img, time=0, name='Figure'):
     cv2.imshow(name, img)
     cv2.waitKey(time)
     cv2.destroyAllWindows()
 
+def transform_image(clean_image, bboxes, strong=False):
+    weak_aug = A.Compose([
+        A.Blur(blur_limit=(3,5), p=0.5),
+        A.RandomBrightnessContrast(p=0.5),
+        A.GaussNoise(std_range=(0.05, 0.15), p=0.3),
+    ])
+
+    strong_aug = A.Compose([
+        A.HorizontalFlip(p=0.5),
+        A.VerticalFlip(p=0.3),
+        A.Rotate(limit=15, p=0.5),
+        A.RandomScale(scale_limit=0.2, p=0.3),  # Масштабирование
+        A.Blur(blur_limit=(5, 9), p=0.5),
+        A.RandomBrightnessContrast(p=0.5),
+        A.GaussNoise(std_range=(0.3, 0.7), p=0.3),
+    ], bbox_params=A.BboxParams(format='yolo', min_visibility=0.8))
+
+    if random.random() < 0.2 or strong:
+        ds = strong_aug(image=clean_image, bboxes=bboxes)
+    else:
+        ds = weak_aug(image=clean_image, bboxes=bboxes)
+
+    return ds['image'], ds['bboxes']
 
 visualize_image(generate_object('triangle',640, 640)[0], time=1000)
