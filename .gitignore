@@ -9,3 +9,4 @@ __pycache__/
 .spyderproject
 .spyderworkspace
 *.npz
+data/
